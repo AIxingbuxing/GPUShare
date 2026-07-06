@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data (contains user identity and ledger - never commit)
+data/user/
+data/witness_store/
+*.db
+*.log
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Test artifacts
+test_e2e.py
+test_smart.py
