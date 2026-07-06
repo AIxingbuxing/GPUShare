@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>去中心化 GPU 算力共享平台</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <!-- 顶栏 -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">⚡</div>
+      <div>
+        <div class="brand-title">GPUShare</div>
+        <div class="brand-sub">去中心化算力共享平台</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav">
+      <a class="nav-item active" data-tab="overview">算力总览</a>
+      <a class="nav-item" data-tab="contributor">贡献端</a>
+      <a class="nav-item" data-tab="network">全网节点</a>
+      <a class="nav-item" data-tab="billing">算力账单</a>
+      <a class="nav-item" data-tab="trade">C2C 交易</a>
+      <a class="nav-item" data-tab="tasks">计算调度</a>
+    </nav>
+    <div class="user-box" id="userBox">
+      <span class="status-dot" id="netDot"></span>
+      <span id="userAddr" class="mono">未登录</span>
+    </div>
+  </header>
+
+  <!-- 登录遮罩 -->
+  <div class="modal-mask" id="authMask">
+    <div class="modal">
+      <div class="modal-tabs">
+        <button class="mtab active" data-mtab="login">登录</button>
+        <button class="mtab" data-mtab="register">注册</button>
+        <button class="mtab" data-mtab="recover">助记词恢复</button>
+      </div>
+      <!-- 登录 -->
+      <form class="mform" id="loginForm">
+        <label>邮箱
+          <input type="email" name="email" placeholder="you@example.com" required />
+        </label>
+        <label>密码
+          <input type="password" name="password" placeholder="本地解锁密码" required />
+        </label>
+        <button type="submit" class="btn primary">登录</button>
+        <p class="hint">首次使用请先注册，注册后将生成 12 词助记词，请妥善保存</p>
+      </form>
+      <!-- 注册 -->
+      <form class="mform hidden" id="registerForm">
+        <label>邮箱
+          <input type="email" name="email" placeholder="you@example.com" required />
+        </label>
+        <label>昵称
+          <input type="text" name="nickname" placeholder="可选" />
+        </label>
+        <label>密码（本地加密存储）
+          <input type="password" name="password" placeholder="至少 6 位" required />
+        </label>
+        <button type="submit" class="btn primary">注册并生成助记词</button>
+        <div class="mnemonic-box hidden" id="mnemonicBox">
+          <p class="warn">⚠️ 请立即保存以下助记词，丢失将无法恢复账号</p>
+          <div class="mnemonic" id="mnemonicText"></div>
+          <button type="button" class="btn small" id="copyMnemonic">复制助记词</button>
+          <button type="button" class="btn primary small" id="confirmMnemonic">我已保存</button>
+        </div>
+      </form>
+      <!-- 恢复 -->
+      <form class="mform hidden" id="recoverForm">
+        <label>邮箱
+          <input type="email" name="email" placeholder="you@example.com" required />
+        </label>
+        <label>助记词（12 个单词，空格分隔）
+          <textarea name="mnemonic" rows="3" placeholder="abandon ability able ..." required></textarea>
+        </label>
+        <label>新密码
+          <input type="password" name="password" placeholder="新的本地解锁密码" required />
+        </label>
+        <button type="submit" class="btn primary">恢复账号</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 主体 -->
+  <main class="main">
+    <!-- 算力总览 -->
+    <section class="tab-panel active" id="tab-overview">
+      <div class="grid g3">
+        <div class="card">
+          <div class="card-title">TPT 余额</div>
+          <div class="big-num" id="balanceNum">0.00</div>
+          <div class="sub">质押 <span id="stakedNum">0.00</span> TPT</div>
+          <div class="row gap">
+            <button class="btn primary small" id="btnDeposit">充值</button>
+            <button class="btn small" id="btnTransfer">转账</button>
+            <button class="btn small" id="btnStake">质押</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">本机 GPU</div>
+          <div id="gpuName" class="mono small">检测中...</div>
+          <div class="row mt">
+            <div class="metric">
+              <div class="metric-label">TOPS</div>
+              <div class="metric-val" id="gpuTops">0.0</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">利用率</div>
+              <div class="metric-val" id="gpuUtil">0%</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">温度</div>
+              <div class="metric-val" id="gpuTemp">0℃</div>
+            </div>
+          </div>
+          <div class="row mt">
+            <div class="metric">
+              <div class="metric-label">显存</div>
+              <div class="metric-val" id="gpuVram">0/0 MB</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">功耗</div>
+              <div class="metric-val" id="gpuPower">0 W</div>
+            </div>
+          </div>
+          <button class="btn small mt" id="btnBenchmark">基准测试</button>
+        </div>
+        <div class="card">
+          <div class="card-title">算力调度</div>
+          <div class="setting-row">
+            <span>本地 GPU 协同</span>
+            <label class="switch">
+              <input type="checkbox" id="localEnabled" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <span>本地使用率上限</span>
+            <div class="range-box">
+              <input type="range" id="localLimit" min="0" max="100" value="80" />
+              <span id="localLimitVal">80%</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span>共享算力（贡献端）</span>
+            <label class="switch">
+              <input type="checkbox" id="sharingEnabled" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <span>共享使用率上限</span>
+            <div class="range-box">
+              <input type="range" id="shareLimit" min="0" max="100" value="80" />
+              <span id="shareLimitVal">80%</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span>使用远程算力（需求端）</span>
+            <label class="switch">
+              <input type="checkbox" id="remoteEnabled" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="sub" id="mutexHint" style="font-size:11px;color:#d97706;padding:4px 0;">
+            共享算力与使用远程算力互斥，不可同时开启
+          </div>
+          <div class="setting-row">
+            <span>调度模式</span>
+            <select id="modeSelect">
+              <option value="speed">极速模式</option>
+              <option value="balanced" selected>均衡模式</option>
+              <option value="economy">省钱模式</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mt">
+        <div class="card-title">实时算力监控</div>
+        <canvas id="gpuChart" height="80"></canvas>
+      </div>
+
+      <div class="card mt">
+        <div class="card-title">计费规则公示</div>
+        <table class="rule-table">
+          <tr><td>计量单位</td><td>1 TPT = 1 TOPS · 1 分钟</td></tr>
+          <tr><td>消费公式</td><td>实测 TOPS × 显存占用率 × 有效时长(分钟)</td></tr>
+          <tr><td>本地算力</td><td>免费，不计 TPT</td></tr>
+          <tr><td>远程算力</td><td>按 TPT 计费</td></tr>
+          <tr><td>手续费</td><td>2%（1% 见证池 + 0.5% 运维 + 0.5% 收益）</td></tr>
+          <tr><td>贡献者收益</td><td>98%，挑战期 1 小时后到账</td></tr>
+          <tr><td>质押门槛</td><td>≥ 100 TPT（新用户赠送 200 TPT）</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <!-- 贡献端 -->
+    <section class="tab-panel" id="tab-contributor">
+      <div class="grid g4">
+        <div class="card stat">
+          <div class="big-num" id="contribTotalEarned" style="color:#16a34a">0.00</div>
+          <div class="sub">累计收益 (TPT)</div>
+        </div>
+        <div class="card stat">
+          <div class="big-num" id="contribPending" style="color:#d97706">0.00</div>
+          <div class="sub">待确认收益 (TPT)</div>
+        </div>
+        <div class="card stat">
+          <div class="big-num" id="contribTasks">0</div>
+          <div class="sub">完成任务数</div>
+        </div>
+        <div class="card stat">
+          <div class="big-num" id="contribSuccess">100%</div>
+          <div class="sub">成功率</div>
+        </div>
+      </div>
+
+      <div class="grid g2 mt">
+        <div class="card">
+          <div class="card-title">共享控制</div>
+          <div class="setting-row">
+            <span>算力共享</span>
+            <label class="switch">
+              <input type="checkbox" id="contribSharingEnabled" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <span>GPU 使用率上限</span>
+            <div class="range-box">
+              <input type="range" id="contribGpuLimit" min="0" max="100" value="80" />
+              <span id="contribGpuLimitVal">80%</span>
+            </div>
+          </div>
+          <div class="row gap mt" style="padding:8px 0;">
+            <div style="flex:1;text-align:center;">
+              <div class="sub">质押</div>
+              <div style="font-size:18px;font-weight:700;color:#2563eb" id="contribStaked">0 TPT</div>
+            </div>
+            <div style="flex:1;text-align:center;">
+              <div class="sub">共享时长</div>
+              <div style="font-size:18px;font-weight:700;" id="contribDuration">0m</div>
+            </div>
+            <div style="flex:1;text-align:center;">
+              <div class="sub">活跃任务</div>
+              <div style="font-size:18px;font-weight:700;color:#d97706" id="contribActive">0</div>
+            </div>
+          </div>
+          <div class="row gap mt">
+            <button class="btn small" id="btnContribStake">追加质押</button>
+            <button class="btn small" id="btnContribUnstake">解除质押</button>
+          </div>
+          <div class="sub mt" id="contribStakeHint" style="font-size:11px;color:#94a3b8;">
+            共享算力无需质押，开启后自动接取远程任务
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">设备状态</div>
+          <div id="contribGpuName" class="mono small">检测中...</div>
+          <div class="row mt">
+            <div class="metric">
+              <div class="metric-label">GPU 利用率</div>
+              <div class="metric-val" id="contribGpuUtil">0%</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">温度</div>
+              <div class="metric-val" id="contribGpuTemp">0℃</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">显存</div>
+              <div class="metric-val" id="contribGpuVram">0/0 MB</div>
+            </div>
+          </div>
+          <div class="progress-bar mt" style="height:8px;">
+            <div class="progress-fill" id="contribGpuBar" style="width:0%"></div>
+          </div>
+          <div class="sub mt" style="font-size:11px;">
+            共享开启后，远程任务将自动接取并执行，结果自动反馈给需求方
+          </div>
+        </div>
+      </div>
+
+      <div class="card mt">
+        <div class="card-title">任务执行记录（贡献端）</div>
+        <table class="data-table">
+          <thead>
+            <tr><th>时间</th><th>任务类型</th><th>需求方</th><th>状态</th><th>耗时</th><th>实测TOPS</th><th>收益</th></tr>
+          </thead>
+          <tbody id="contribHistoryTbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 全网节点 -->
+    <section class="tab-panel" id="tab-network">
+      <div class="grid g4">
+        <div class="card stat"><div class="big-num" id="peerCount">0</div><div class="sub">在线节点</div></div>
+        <div class="card stat"><div class="big-num" id="sharingCount">0</div><div class="sub">共享节点</div></div>
+        <div class="card stat"><div class="big-num" id="totalTops">0</div><div class="sub">总算力 TOPS</div></div>
+        <div class="card stat"><div class="big-num" id="avgLatency">0</div><div class="sub">平均延迟 ms</div></div>
+      </div>
+      <div class="card mt">
+        <div class="card-title">在线节点列表</div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>地址</th><th>昵称</th><th>GPU</th><th>TOPS</th>
+              <th>延迟</th><th>共享</th><th>信誉</th><th>状态</th>
+            </tr>
+          </thead>
+          <tbody id="peersTbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 算力账单 -->
+    <section class="tab-panel" id="tab-billing">
+      <div class="grid g4">
+        <div class="card stat"><div class="big-num" id="txCount">0</div><div class="sub">交易总数</div></div>
+        <div class="card stat"><div class="big-num" id="totalEarned">0</div><div class="sub">累计收益 TPT</div></div>
+        <div class="card stat"><div class="big-num" id="totalConsumed">0</div><div class="sub">累计消费 TPT</div></div>
+        <div class="card stat"><div class="big-num" id="settlementCount">0</div><div class="sub">结算单数</div></div>
+      </div>
+      <div class="card mt">
+        <div class="card-title">交易记录</div>
+        <table class="data-table">
+          <thead>
+            <tr><th>时间</th><th>类型</th><th>方向</th><th>对方</th><th>金额</th><th>手续费</th><th>状态</th></tr>
+          </thead>
+          <tbody id="txTbody"></tbody>
+        </table>
+      </div>
+      <div class="card mt">
+        <div class="card-title">结算单</div>
+        <table class="data-table">
+          <thead>
+            <tr><th>结算 ID</th><th>任务</th><th>贡献者</th><th>实测TOPS</th><th>时长(分)</th><th>TPT</th><th>收益</th><th>状态</th></tr>
+          </thead>
+          <tbody id="settlementTbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- C2C 交易 -->
+    <section class="tab-panel" id="tab-trade">
+      <div class="grid g2">
+        <div class="card">
+          <div class="card-title">点对点转账</div>
+          <label>对方地址
+            <input type="text" id="transferTo" placeholder="GPU..." />
+          </label>
+          <label>金额 (TPT)
+            <input type="number" id="transferAmount" min="0.01" step="0.01" />
+          </label>
+          <div class="sub" id="transferFee">手续费：0.00 TPT</div>
+          <button class="btn primary mt" id="btnDoTransfer">发送转账</button>
+        </div>
+        <div class="card">
+          <div class="card-title">挂单交易</div>
+          <label>方向
+            <select id="orderType">
+              <option value="buy">买入</option>
+              <option value="sell">卖出</option>
+            </select>
+          </label>
+          <label>单价 (元/TPT)
+            <input type="number" id="orderPrice" min="0.01" step="0.01" />
+          </label>
+          <label>数量 (TPT)
+            <input type="number" id="orderAmount" min="0.01" step="0.01" />
+          </label>
+          <button class="btn primary mt" id="btnPlaceOrder">提交挂单</button>
+        </div>
+      </div>
+      <div class="card mt">
+        <div class="card-title">当前挂单</div>
+        <table class="data-table">
+          <thead><tr><th>方向</th><th>挂单方</th><th>单价</th><th>数量</th><th>已成交</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody id="ordersTbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 计算调度监控 -->
+    <section class="tab-panel" id="tab-tasks">
+      <div class="grid g4">
+        <div class="card stat">
+          <div class="big-num" id="computeTotal">0</div>
+          <div class="sub">计算请求总数</div>
+        </div>
+        <div class="card stat">
+          <div class="big-num" id="computeLocal" style="color:#16a34a">0</div>
+          <div class="sub">本地执行</div>
+        </div>
+        <div class="card stat">
+          <div class="big-num" id="computeRemote" style="color:#d97706">0</div>
+          <div class="sub">远程执行</div>
+        </div>
+        <div class="card stat">
+          <div class="big-num" id="computeSuccess">100%</div>
+          <div class="sub">成功率</div>
+        </div>
+      </div>
+
+      <div class="card mt">
+        <div class="card-title">实时 GPU 负载与调度阈值</div>
+        <div class="row" style="gap:20px;align-items:center;">
+          <div style="flex:1">
+            <div class="sub">当前 GPU 利用率</div>
+            <div style="font-size:24px;font-weight:700;color:#2563eb" id="currentGpuUtil">0%</div>
+            <div class="progress-bar mt" style="height:10px;">
+              <div class="progress-fill" id="gpuProgressBar" style="width:0%"></div>
+            </div>
+          </div>
+          <div style="text-align:center;padding:0 20px;border-left:1px solid #e2e8f0;">
+            <div class="sub">调度阈值</div>
+            <div style="font-size:13px;color:#64748b;margin-top:4px;">
+              <span style="color:#16a34a">&lt;50% 本地</span><br>
+              <span style="color:#d97706">50-75% 视情况</span><br>
+              <span style="color:#dc2626">&gt;75% 远程</span>
+            </div>
+          </div>
+        </div>
+        <canvas id="computeGpuChart" height="60" style="margin-top:12px;"></canvas>
+      </div>
+
+      <div class="card mt">
+        <div class="card-title">调度决策日志（实时）</div>
+        <table class="data-table">
+          <thead><tr><th>时间</th><th>来源</th><th>类型</th><th>调度</th><th>GPU利用率</th><th>决策原因</th></tr></thead>
+          <tbody id="scheduleLogsTbody"></tbody>
+        </table>
+      </div>
+
+      <div class="card mt">
+        <div class="card-title">外部软件接入方式</div>
+        <div class="grid g2">
+          <div>
+            <div class="sub" style="margin-bottom:8px;font-weight:600;">方式一：OpenAI 兼容 API（推荐大模型软件）</div>
+            <div class="result-box" style="font-size:11px;"># 在大模型软件中配置 base_url 指向 GPUShare：
+base_url = "http://127.0.0.1:5000/v1"
+api_key = "gpushare"
+
+# 或使用 openai 库：
+from openai import OpenAI
+client = OpenAI(
+    base_url="http://127.0.0.1:5000/v1",
+    api_key="gpushare"
+)
+response = client.chat.completions.create(
+    model="llama2",
+    messages=[{"role":"user","content":"你好"}]
+)</div>
+          </div>
+          <div>
+            <div class="sub" style="margin-bottom:8px;font-weight:600;">方式二：Python SDK</div>
+            <div class="result-box" style="font-size:11px;">from gpushare import ComputeClient
+
+client = ComputeClient()
+# 推理请求
+result = client.inference("llama2", [
+    {"role": "user", "content": "你好"}
+])
+# 张量计算
+result = client.tensor_compute("matmul", {
+    "shape": [1024, 1024]
+])
+# GPUShare 自动调度本地/远程 GPU</div>
+          </div>
+        </div>
+        <div class="sub mt" style="padding:8px;background:#dbeafe;border-radius:6px;color:#1e40af;">
+          GPUShare 在后台自动监控本地 GPU 负载，当本地软件（大模型等）产生计算需求时，
+          智能调度本地 GPU 和远程 GPU 协同完成，对调用方完全透明。
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 充值弹窗 -->
+  <div class="modal-mask hidden" id="depositMask">
+    <div class="modal small">
+      <div class="modal-title">TPT 充值（0 手续费）</div>
+      <label>充值金额 (TPT)
+        <input type="number" id="depositAmount" min="1" step="1" value="100" />
+      </label>
+      <label>支付方式
+        <select id="depositChannel">
+          <option value="wechat">微信支付</option>
+          <option value="alipay">支付宝</option>
+        </select>
+      </label>
+      <div class="qr-box" id="qrBox">
+        <div class="qr-placeholder">扫码支付（演示）</div>
+      </div>
+      <div class="row gap mt">
+        <button class="btn" id="btnCancelDeposit">取消</button>
+        <button class="btn primary" id="btnConfirmDeposit">确认支付</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
